@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Insurance Claims Analytics Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        body { background: #f5f7fa; min-height: 100vh; padding: 12px; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        header { background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); color: white; padding: 14px 20px; border-radius: 8px; margin-bottom: 12px; box-shadow: 0 2px 10px rgba(30, 58, 138, 0.3); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+        header h1 { font-size: 20px; font-weight: 700; }
+        header p { opacity: 0.9; font-size: 12px; }
+        .kpi-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; margin-bottom: 12px; }
+        .kpi-card { background: white; padding: 12px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); border-left: 3px solid #3b82f6; }
+        .kpi-card.approved { border-left-color: #22c55e; }
+        .kpi-card.flagged { border-left-color: #ef4444; }
+        .kpi-card.rate { border-left-color: #f59e0b; }
+        .kpi-label { font-size: 10px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 3px; }
+        .kpi-value { font-size: 22px; font-weight: 700; color: #111827; line-height: 1.1; }
+        .charts-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-bottom: 12px; }
+        .chart-card { background: white; padding: 12px; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); }
+        .chart-card h3 { font-size: 13px; font-weight: 600; color: #111827; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #e5e7eb; }
+        .chart-wrapper { position: relative; height: 220px; }
+        .table-card { background: white; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.05); overflow: hidden; }
+        .table-card h3 { font-size: 13px; font-weight: 600; color: #111827; padding: 12px; border-bottom: 1px solid #e5e7eb; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
+        th, td { padding: 6px 8px; text-align: left; }
+        th { background: #f9fafb; color: #374151; font-weight: 600; border-bottom: 1px solid #e5e7eb; white-space: nowrap; }
+        td { color: #111827; border-bottom: 1px solid #f3f4f6; white-space: nowrap; }
+        tr:hover td { background: #f9fafb; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 9px; font-weight: 600; text-transform: uppercase; }
+        .badge-approved { background: #dcfce7; color: #166534; }
+        .badge-rejected { background: #fee2e2; color: #991b1b; }
+        .badge-pending { background: #fef3c7; color: #92400e; }
+        .badge-flagged { background: #fee2e2; color: #991b1b; }
+        .filters { display: flex; gap: 8px; margin-bottom: 8px; flex-wrap: wrap; padding: 0 12px; }
+        .filter-select { padding: 6px 10px; border: 1px solid #d1d5db; border-radius: 6px; background: white; font-size: 11px; color: #374151; min-width: 130px; }
+        .filter-select:focus { outline: none; border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15); }
+        .loading { text-align: center; padding: 20px; color: #6b7280; font-size: 12px; }
+        @media (max-width: 1200px) {
+            .kpi-grid { grid-template-columns: repeat(4, 1fr); }
+            .charts-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div>
+                <h1>Insurance Claims Analytics</h1>
+                <p>500 customers • 663 policies • 252 claims • 12 flagged</p>
+            </div>
+        </header>
+
+        <div class="kpi-grid" id="kpiGrid">
+            <div class="loading">Loading...</div>
+        </div>
+
+        <div class="charts-grid" id="chartsGrid">
+            <div class="loading">Loading...</div>
+        </div>
+
+        <div class="table-card">
+            <h3>Flagged Claims for Fraud Review</h3>
+            <div class="filters">
+                <select class="filter-select" id="filterPolicyType"><option value="">Policy Type</option></select>
+                <select class="filter-select" id="filterState"><option value="">State</option></select>
+                <select class="filter-select" id="filterFlag"><option value="">Flag Type</option><option value="high_amount">High Amount</option><option value="repeat_claimant">Repeat Claimant</option></select>
+            </div>
+            <div style="overflow-x: auto; padding: 0 12px 12px;">
+                <table id="flaggedTable">
+                    <thead>
+                        <tr>
+                            <th>ID</th><th>Customer</th><th>Type</th><th>State</th><th>Date</th>
+                            <th>Amount</th><th>Status</th><th>vs Avg</th><th>Flags</th>
+                        </tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let claimsData = [];
+        let fraudData = [];
+
+        async function loadData() {
+            const [claimsResp, fraudResp] = await Promise.all([
+                fetch('data/claims_enriched.csv'),
+                fetch('data/fraud_flags.csv')
+            ]);
+            const claimsText = await claimsResp.text();
+            const fraudText = await fraudResp.text();
+
+            claimsData = Papa.parse(claimsText, { header: true, dynamicTyping: true }).data;
+            fraudData = Papa.parse(fraudText, { header: true, dynamicTyping: true }).data;
+
+            buildDashboard();
+        }
+
+        function buildDashboard() {
+            buildKPIs();
+            buildCharts();
+            buildFlaggedTable();
+            populateFilters();
+        }
+
+        function buildKPIs() {
+            const totalClaims = claimsData.length;
+            const approvedClaims = claimsData.filter(c => c.status === 'Approved').length;
+            const approvedAmount = claimsData.filter(c => c.status === 'Approved').reduce((sum, c) => sum + c.claim_amount, 0);
+            const totalAmount = claimsData.reduce((sum, c) => sum + c.claim_amount, 0);
+            const approvalRate = (approvedClaims / totalClaims * 100).toFixed(1);
+            const avgClaim = (totalAmount / totalClaims).toFixed(0);
+            const flaggedClaims = fraudData.filter(f => f.high_amount_flag === 1 || f.repeat_claimant_flag === 1).length;
+            const flagRate = (flaggedClaims / totalClaims * 100).toFixed(1);
+
+            document.getElementById('kpiGrid').innerHTML = `
+                <div class="kpi-card"><div class="kpi-label">Total Claims</div><div class="kpi-value">${totalClaims.toLocaleString()}</div></div>
+                <div class="kpi-card approved"><div class="kpi-label">Approved</div><div class="kpi-value">${approvedClaims.toLocaleString()}</div></div>
+                <div class="kpi-card"><div class="kpi-label">Total Amount</div><div class="kpi-value">$${(totalAmount/1e6).toFixed(1)}M</div></div>
+                <div class="kpi-card approved"><div class="kpi-label">Approved Amt</div><div class="kpi-value">$${(approvedAmount/1e6).toFixed(1)}M</div></div>
+                <div class="kpi-card rate"><div class="kpi-label">Approval Rate</div><div class="kpi-value">${approvalRate}%</div></div>
+                <div class="kpi-card rate"><div class="kpi-label">Avg Claim</div><div class="kpi-value">$${Number(avgClaim).toLocaleString()}</div></div>
+                <div class="kpi-card flagged"><div class="kpi-label">Flagged</div><div class="kpi-value">${flaggedClaims}</div></div>
+                <div class="kpi-card flagged"><div class="kpi-label">Flag Rate</div><div class="kpi-value">${flagRate}%</div></div>
+            `;
+        }
+
+        function buildCharts() {
+            const grid = document.getElementById('chartsGrid');
+            grid.innerHTML = '';
+
+            const monthlyChart = createChartCard('Monthly Claims Trend');
+            const policyChart = createChartCard('Amount by Policy Type');
+            const stateChart = createChartCard('Claims by State');
+            const statusChart = createChartCard('Claims by Status');
+
+            grid.append(monthlyChart.card, policyChart.card, stateChart.card, statusChart.card);
+
+            buildMonthlyChart(monthlyChart.ctx);
+            buildPolicyChart(policyChart.ctx);
+            buildStateChart(stateChart.ctx);
+            buildStatusChart(statusChart.ctx);
+        }
+
+        function createChartCard(title) {
+            const card = document.createElement('div');
+            card.className = 'chart-card';
+            card.innerHTML = `<h3>${title}</h3><div class="chart-wrapper"><canvas></canvas></div>`;
+            const ctx = card.querySelector('canvas').getContext('2d');
+            return { card, ctx };
+        }
+
+        function buildMonthlyChart(ctx) {
+            const monthly = {};
+            claimsData.forEach(c => {
+                const m = c.claim_month;
+                if (!monthly[m]) monthly[m] = { claims: 0, amount: 0 };
+                monthly[m].claims++;
+                if (c.status === 'Approved') monthly[m].amount += c.claim_amount;
+            });
+            const months = Object.keys(monthly).sort();
+            const claims = months.map(m => monthly[m].claims);
+            const approved = months.map(m => monthly[m].amount);
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: months,
+                    datasets: [
+                        { label: 'Claims', data: claims, borderColor: '#3b82f6', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, yAxisID: 'y', pointRadius: 3 },
+                        { label: 'Approved $', data: approved, borderColor: '#22c55e', backgroundColor: 'rgba(34,197,94,0.1)', fill: true, tension: 0.3, yAxisID: 'y1', pointRadius: 3 }
+                    ]
+                },
+                options: {
+                    responsive: true, maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        y: { type: 'linear', position: 'left', title: { display: true, text: 'Claims', font: { size: 10 } }, beginAtZero: true, ticks: { font: { size: 9 } } },
+                        y1: { type: 'linear', position: 'right', title: { display: true, text: '$', font: { size: 10 } }, beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { font: { size: 9 } } }
+                    },
+                    plugins: { legend: { position: 'top', labels: { font: { size: 10 }, usePointStyle: true } } }
+                }
+            });
+        }
+
+        function buildPolicyChart(ctx) {
+            const byPolicy = {};
+            claimsData.forEach(c => {
+                if (!byPolicy[c.policy_type]) byPolicy[c.policy_type] = { amount: 0 };
+                byPolicy[c.policy_type].amount += c.claim_amount;
+            });
+            const types = Object.keys(byPolicy).sort((a,b) => byPolicy[b].amount - byPolicy[a].amount);
+            const amounts = types.map(t => byPolicy[t].amount);
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: { labels: types, datasets: [{ data: amounts, backgroundColor: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444'], borderRadius: 4 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: '$', font: { size: 10 } }, ticks: { font: { size: 9 } } }, x: { ticks: { font: { size: 10 } } } } }
+            });
+        }
+
+        function buildStateChart(ctx) {
+            const byState = {};
+            claimsData.forEach(c => { byState[c.state] = (byState[c.state] || 0) + 1; });
+            const states = Object.keys(byState).sort((a,b) => byState[b] - byState[a]);
+            const counts = states.map(s => byState[s]);
+
+            new Chart(ctx, {
+                type: 'bar',
+                data: { labels: states, datasets: [{ data: counts, backgroundColor: '#8b5cf6', borderRadius: 4 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, title: { display: true, text: 'Claims', font: { size: 10 } }, ticks: { font: { size: 9 } } }, x: { ticks: { font: { size: 10 } } } } }
+            });
+        }
+
+        function buildStatusChart(ctx) {
+            const byStatus = {};
+            claimsData.forEach(c => { byStatus[c.status] = (byStatus[c.status] || 0) + 1; });
+            const statuses = Object.keys(byStatus);
+            const counts = statuses.map(s => byStatus[s]);
+            const colors = { Approved: '#22c55e', Rejected: '#ef4444', Pending: '#f59e0b' };
+
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: { labels: statuses, datasets: [{ data: counts, backgroundColor: statuses.map(s => colors[s] || '#6b7280'), borderWidth: 0 }] },
+                options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { font: { size: 10 }, usePointStyle: true, padding: 8 } } }, cutout: '60%' }
+            });
+        }
+
+        function populateFilters() {
+            const policyTypes = [...new Set(fraudData.map(f => f.policy_type))].sort();
+            const states = [...new Set(fraudData.map(f => f.state))].sort();
+
+            const policySelect = document.getElementById('filterPolicyType');
+            const stateSelect = document.getElementById('filterState');
+
+            policyTypes.forEach(t => policySelect.add(new Option(t, t)));
+            states.forEach(s => stateSelect.add(new Option(s, s)));
+
+            [policySelect, stateSelect, document.getElementById('filterFlag')].forEach(s => s.addEventListener('change', buildFlaggedTable));
+        }
+
+        function buildFlaggedTable() {
+            const policyFilter = document.getElementById('filterPolicyType').value;
+            const stateFilter = document.getElementById('filterState').value;
+            const flagFilter = document.getElementById('filterFlag').value;
+
+            let filtered = fraudData.filter(f => f.high_amount_flag === 1 || f.repeat_claimant_flag === 1);
+
+            if (policyFilter) filtered = filtered.filter(f => f.policy_type === policyFilter);
+            if (stateFilter) filtered = filtered.filter(f => f.state === stateFilter);
+            if (flagFilter === 'high_amount') filtered = filtered.filter(f => f.high_amount_flag === 1);
+            if (flagFilter === 'repeat_claimant') filtered = filtered.filter(f => f.repeat_claimant_flag === 1);
+
+            filtered.sort((a,b) => b.amount_vs_type_avg - a.amount_vs_type_avg);
+
+            const tbody = document.querySelector('#flaggedTable tbody');
+            tbody.innerHTML = filtered.map(f => `
+                <tr>
+                    <td>${f.claim_id}</td>
+                    <td>${f.customer_id}</td>
+                    <td>${f.policy_type}</td>
+                    <td>${f.state}</td>
+                    <td>${f.claim_date}</td>
+                    <td>$${f.claim_amount.toLocaleString(undefined, {minimumFractionDigits: 0, maximumFractionDigits: 0})}</td>
+                    <td><span class="badge badge-${f.status.toLowerCase()}">${f.status}</span></td>
+                    <td>${f.amount_vs_type_avg}x</td>
+                    <td>
+                        ${f.high_amount_flag ? '<span class="badge badge-flagged">High Amt</span>' : ''}
+                        ${f.repeat_claimant_flag ? '<span class="badge badge-flagged">Repeat</span>' : ''}
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        loadData().catch(err => {
+            console.error(err);
+            document.getElementById('kpiGrid').innerHTML = '<div style="color:red;text-align:center;padding:20px">Failed to load data. Serve via HTTP server.</div>';
+        });
+    </script>
+</body>
+</html>
